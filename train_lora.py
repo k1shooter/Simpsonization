@@ -27,6 +27,7 @@ def masked_denoising_loss(noise_pred, noise_target, mask_latent):
 def get_train_image_and_mask(image, transform, vae, device):
     """
     Exemplar 마스크가 없으므로, 전체 이미지 영역을 마스크(1.0)로 가정하여 학습 데이터를 준비합니다.
+    (핵심 수정: 마스킹된 입력 이미지를 0으로 설정하여 UNet이 비어있는 곳을 채우도록 명확히 지시)
     """
     # 이미지 텐서
     pixel_values = transform(image).unsqueeze(0).to(device)
@@ -36,18 +37,17 @@ def get_train_image_and_mask(image, transform, vae, device):
         latents = vae.encode(pixel_values).latent_dist.sample()
         latents = latents * vae.config.scaling_factor
     
-    # --- 핵심 수정: 마스크가 없으므로 잠재 공간 크기에 맞춰 전체 1.0 마스크 생성 ---
+    # --- 핵심: 잠재 공간 크기에 맞춰 전체 1.0 마스크 생성 ---
     _, _, h, w = latents.shape
     mask_latent = torch.ones((1, 1, h, w), device=device, dtype=latents.dtype)
-    # ----------------------------------------------------------------------
+    # ----------------------------------------------------
     
-    # Inpaint U-Net 입력 준비 (9채널)
-    # 마스킹된 이미지 Latent (보존 영역 latent, 마스크 영역 0)
-    # mask_latent가 1.0이므로, masked_latent_input은 latents와 동일하게 됩니다.
-    masked_latent_input = latents * mask_latent
+    # FIX: 마스킹된 입력 이미지를 0으로 설정 (UNet에게 비어있다고 알려줌)
+    # 이전 로직: masked_latent_input = latents * mask_latent (latents와 동일, 잘못된 학습 신호)
+    masked_latent_input = latents * (1 - mask_latent)
     
     return latents, mask_latent, masked_latent_input
-
+    
 def train_lora():
     print(f"Loading model: {config.MODEL_ID}")
     pipeline = StableDiffusionInpaintPipeline.from_pretrained(config.MODEL_ID)
@@ -77,18 +77,27 @@ def train_lora():
         kernel_size = unet.conv_in.kernel_size
         padding = unet.conv_in.padding
 
-         # 9채널을 받는 새로운 conv_in 레이어 생성 (가중치는 새로 초기화됨)
+        # 9채널을 받는 새로운 conv_in 레이어 생성
         new_conv_in = nn.Conv2d(
             in_channels=9, 
             out_channels=out_channels, 
             kernel_size=kernel_size, 
             padding=padding, 
-            bias=unet.conv_in.bias is not None # 기존 bias 설정 유지
+            bias=unet.conv_in.bias is not None
         ).to(unet.dtype).to(config.DEVICE)
 
-        # 새로운 conv_in으로 교체 (이 레이어의 가중치도 LoRA 학습 대상이 될 수 있습니다)
+        # Initialize weights: Copy original 4 channels, zero others
+        with torch.no_grad():
+            new_conv_in.weight[:, :4, :, :] = unet.conv_in.weight
+            new_conv_in.weight[:, 4:, :, :] = 0 # Zero init for mask/masked_image channels
+            if unet.conv_in.bias is not None:
+                new_conv_in.bias = unet.conv_in.bias
+
         unet.conv_in = new_conv_in
-        print(f"UNet input channels successfully adapted to {unet.conv_in.in_channels}.")
+        print(f"UNet input channels successfully adapted to {unet.conv_in.in_channels} (with zero-init).")
+
+    # Add conv_in to modules_to_save so it gets trained and saved
+    lora_config.modules_to_save = ["conv_in"]
 
     unet = get_peft_model(unet, lora_config)
     unet.print_trainable_parameters()

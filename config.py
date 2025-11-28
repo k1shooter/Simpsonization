@@ -12,7 +12,7 @@ TARGET_MODULES = ["to_k", "to_v"] # Targeting attention layers
 LORA_DROPOUT = 0.0
 
 # Training Settings
-TRAIN_EPOCHS = 300 # Enough to learn the style/identity of a single image
+TRAIN_EPOCHS = 1000 # Enough to learn the style/identity of a single image
 LEARNING_RATE = 5e-5
 OUTPUT_DIR = "lora_weights"
 LORA_WEIGHTS_NAME = "simpson_lora.pt"
@@ -24,5 +24,5 @@ EXEMPLAR_PROMPT = "A photo of a simpson face" # Fixed prompt as requested
 NEGATIVE_PROMPT = "blurry image, disfigured face, bad anatomy, low resolution, deformed body features, poorly drawn face, bad composition"
 
 # Inpainting Settings
-NUM_INFERENCE_STEPS = 50
+NUM_INFERENCE_STEPS = 100
 GUIDANCE_SCALE = 8.0

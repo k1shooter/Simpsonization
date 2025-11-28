@@ -80,6 +80,13 @@ class CustomInpaintingPipeline:
                 bias=unet.conv_in.bias is not None 
             ).to(unet.dtype).to(device)
             
+            # Initialize weights: Copy original 4 channels, zero others
+            with torch.no_grad():
+                new_conv_in.weight[:, :4, :, :] = unet.conv_in.weight
+                new_conv_in.weight[:, 4:, :, :] = 0 # Zero init for mask/masked_image channels
+                if unet.conv_in.bias is not None:
+                    new_conv_in.bias = unet.conv_in.bias
+            
             unet.conv_in = new_conv_in
             print(f"UNet input channels successfully adapted to {unet.conv_in.in_channels}.")
         # -------------------------------------------------------------
