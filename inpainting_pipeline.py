@@ -4,7 +4,7 @@
 # -------------------------------------------------------------
 
 import torch
-from diffusers import StableDiffusionPipeline, DDIMScheduler
+from diffusers import StableDiffusionInpaintPipeline, DDIMScheduler
 import numpy as np
 from PIL import Image
 import config
@@ -24,6 +24,7 @@ def yolo_to_mask_image(txt_path, image_size=(512, 512)):
         with open(txt_path, 'r') as f:
             lines = f.readlines()
     except FileNotFoundError:
+        print(f"Warning: YOLO label file not found at {txt_path}. Using all-black mask.")
         return Image.fromarray(mask_arr, 'L') 
         
     for line in lines:
@@ -31,6 +32,7 @@ def yolo_to_mask_image(txt_path, image_size=(512, 512)):
             parts = line.strip().split()
             if len(parts) < 5: continue
             
+            # Assuming format: class x_c y_c w h
             _, x_c, y_c, w, h = map(float, parts[:5])
             
             x_min = int((x_c - w/2) * img_w)
@@ -43,6 +45,7 @@ def yolo_to_mask_image(txt_path, image_size=(512, 512)):
             x_max = min(img_w, x_max)
             y_max = min(img_h, y_max)
             
+            # Fill the bounding box region with 255 (white for mask)
             mask_arr[y_min:y_max, x_min:x_max] = 255
             
         except ValueError as e:
@@ -57,7 +60,7 @@ class CustomInpaintingPipeline:
         print(f"Loading Inpainting pipeline from {base_model_id}...")
         
         # StableDiffusionPipeline 로드 (Base 모델이므로)
-        self.pipe = StableDiffusionPipeline.from_pretrained(base_model_id, torch_dtype=torch.float16)
+        self.pipe = StableDiffusionInpaintPipeline.from_pretrained(base_model_id, torch_dtype=torch.float16)
         self.pipe.to(device)
         
         # --- CRITICAL FIX: 4-채널 UNet을 9-채널 Inpainting 입력용으로 확장 ---
@@ -90,10 +93,26 @@ class CustomInpaintingPipeline:
         self.pipe.scheduler = DDIMScheduler.from_config(self.pipe.scheduler.config)
         
     @torch.no_grad()
-    def inpaint(self, image, mask_txt_path, prompt, exemplar_image=None, num_inference_steps=50, guidance_scale=7.5, seed=None):
+    def inpaint(self, image, mask_path, prompt, exemplar_image=None, num_inference_steps=50, guidance_scale=7.5, seed=None):
         
-        # 1. BBox TXT 파일을 PIL Image 마스크로 변환
-        input_mask = yolo_to_mask_image(mask_txt_path, image_size=(512, 512))
+        image_size_for_mask = (512, 512)
+
+        # 1. BBox TXT 파일을 PIL Image 마스크로 변환 로직 (오류 해결)
+        if isinstance(mask_path, str) and mask_path.lower().endswith(('.txt')):
+            # YOLO TXT 파일 처리: yolo_to_mask_image 함수 사용
+            input_mask = yolo_to_mask_image(mask_path, image_size=image_size_for_mask)
+        elif isinstance(mask_path, str) and mask_path.lower().endswith(('.png', '.jpg', '.jpeg')):
+            # 이미지 파일 처리 (혹시 모를 경우)
+            try:
+                input_mask = Image.open(mask_path).convert("L")
+                input_mask = input_mask.resize(image_size_for_mask, resample=Image.NEAREST)
+            except FileNotFoundError:
+                print(f"Error: Mask image file not found at {mask_path}. Using all-black mask.")
+                input_mask = Image.fromarray(np.zeros(image_size_for_mask, dtype=np.uint8), 'L')
+        else:
+            # Fallback
+            print(f"Warning: Mask path {mask_path} has unknown format. Using all-black mask.")
+            input_mask = Image.fromarray(np.zeros(image_size_for_mask, dtype=np.uint8), 'L')
         
         # 2. Preprocess: Resize images/mask to standard 512x512
         input_image = image.resize((512, 512), resample=Image.LANCZOS)
@@ -168,6 +187,9 @@ class CustomInpaintingPipeline:
         # 5. Prepare Inpainting Condition (Masked Image Latent + Mask)
         masked_image_latent = latents_bg * (1 - mask_latent) 
         latents = initial_latents
+
+        self.pipe.scheduler.set_timesteps(num_inference_steps)
+        timesteps = self.pipe.scheduler.timesteps
         
         # 6. Denoising Loop (PNI Latent 사용 및 Inpainting Blending)
         print("Inpainting...")
@@ -184,11 +206,9 @@ class CustomInpaintingPipeline:
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
             
             latents = self.pipe.scheduler.step(noise_pred, t, latents).prev_sample
-            
-            # Inpainting Blending (보존 영역에 배경 정보 유지)
             latents = latents * mask_latent + latents_bg * (1 - mask_latent)
 
-
+        # latents = latents * mask_latent + latents_bg * (1 - mask_latent)
         # 7. Decode
         latents = 1 / self.pipe.vae.config.scaling_factor * latents
         # FIX: .float() 제거
