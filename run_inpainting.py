@@ -26,9 +26,8 @@ def main():
     
     print(f"Loading image: {args.image}")
     image = Image.open(args.image).convert("RGB")
-    
+    mask = args.mask
     print(f"Loading mask: {args.mask}")
-    mask = Image.open(args.mask).convert("L") # Ensure mask is grayscale
     
     exemplar = None
     if os.path.exists(args.exemplar):
