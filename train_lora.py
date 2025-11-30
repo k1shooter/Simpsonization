@@ -147,7 +147,7 @@ def train_lora():
         mask_root=config.SIMPSON_MASK_ROOT,
         transform=transform
     )
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=4)
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, num_workers=4)
     
     # Text Embeddings
     text_input = pipeline.tokenizer(

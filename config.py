@@ -16,7 +16,7 @@ LORA_DROPOUT = 0.0
 
 # --- Training Settings ---
 # 데이터셋이 작다면 에포크를 충분히(100~300) 주세요
-TRAIN_EPOCHS = 1 
+TRAIN_EPOCHS = 3 
 LEARNING_RATE = 1e-4 
 OUTPUT_DIR = "lora_weights"
 
@@ -31,5 +31,5 @@ EXEMPLAR_PROMPT = "a 3d render of a simpson face, claymation, volumetric lightin
 # --- Inference Settings ---
 NUM_INFERENCE_STEPS = 200
 # [핵심] 높은 Guidance Scale로 3D 프롬프트를 강력하게 반영
-GUIDANCE_SCALE = 10.0
+GUIDANCE_SCALE = 16.0
 NEGATIVE_PROMPT = "2d, flat, drawing, sketch, paper, cartoon, anime, low quality, distorted, blurry, bad anatomy"
