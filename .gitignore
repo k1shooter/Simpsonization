@@ -1,0 +1,23 @@
+# Datasets
+data/
+
+# Generated Images
+*.png
+batch_results*/
+test_results*/
+output*.png
+style_test*.png
+temp_mask*.png
+
+# Logs
+*.log
+train_log.txt
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.env
+
+# System
+.DS_Store
